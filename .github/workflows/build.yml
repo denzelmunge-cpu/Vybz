@@ -1,0 +1,67 @@
+name: Build Vybz APK
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Supports uploading the project as a single .zip from a phone.
+      - name: Unpack source zip (if the project was uploaded as a zip)
+        id: src
+        run: |
+          if [ -f settings.gradle.kts ]; then
+            echo "Source tree found."
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ -f Vybz-source.zip ]; then Z=Vybz-source.zip; else Z=$(ls -t *.zip 2>/dev/null | head -n 1); fi
+          if [ -z "$Z" ]; then
+            echo "No project files or zip yet - upload Vybz-source.zip, then this runs again."
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "Using $Z"
+          unzip -o -q "$Z" -d _src
+          TOP=$(dirname "$(find _src -maxdepth 3 -name settings.gradle.kts | head -n 1)")
+          cp -a "$TOP"/. .
+          echo "ok=true" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-java@v4
+        if: steps.src.outputs.ok == 'true'
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+        if: steps.src.outputs.ok == 'true'
+
+      - name: Build release APK
+        if: steps.src.outputs.ok == 'true'
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon assembleRelease
+          cp app/build/outputs/apk/release/app-release.apk Vybz.apk
+
+      - name: Upload APK (Actions artifact)
+        if: steps.src.outputs.ok == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Vybz-apk
+          path: Vybz.apk
+
+      - name: Publish as a Release (easy download on your phone)
+        if: steps.src.outputs.ok == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: vybz-build-${{ github.run_number }}
+          name: Vybz build ${{ github.run_number }}
+          body: Install Vybz.apk on your Android phone (allow "Install unknown apps" for your browser/files app).
+          files: Vybz.apk
